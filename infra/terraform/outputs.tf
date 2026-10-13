@@ -41,8 +41,13 @@ output "cloudfront_domain" {
 }
 
 output "waf_acl_arn" {
-  description = "For the alb.ingress.kubernetes.io/wafv2-acl-arn annotation."
-  value       = aws_wafv2_web_acl.main.arn
+  description = "For the alb.ingress.kubernetes.io/wafv2-acl-arn annotation: the ALB only accepts CloudFront."
+  value       = aws_wafv2_web_acl.origin.arn
+}
+
+output "edge_waf_acl_arn" {
+  description = "Bot control and per-IP limits, attached to CloudFront."
+  value       = aws_wafv2_web_acl.edge.arn
 }
 
 output "app_secret_name" {

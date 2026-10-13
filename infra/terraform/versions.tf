@@ -29,6 +29,20 @@ provider "aws" {
   }
 }
 
+# CloudFront-scoped resources (the edge WAF) live in us-east-1 whatever the region.
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+
+  default_tags {
+    tags = {
+      project     = "swiftcart"
+      environment = var.environment
+      managed-by  = "terraform"
+    }
+  }
+}
+
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 

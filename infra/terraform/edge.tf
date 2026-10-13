@@ -1,15 +1,21 @@
-# --- AWS WAF on the ALB ------------------------------------------------------------------------------------------
-# Bots are the drop's real enemy: managed bot control, the common rule set, a site-wide per-IP flood guard, and a
-# much tighter per-IP limit on joining the waiting room. Per-account limits are enforced again inside the app.
+# --- The edge: CloudFront + AWS WAF in front of everything -------------------------------------------------------
+# All public traffic (pages, the /api/sc proxy, sign-in, payment webhooks) enters through CloudFront. The WAF that
+# does the real work is attached to CloudFront, because that is where the shopper's own IP is visible: a per-IP
+# rule on the ALB behind CloudFront would count CloudFront's edge servers, and one busy edge would get thousands of
+# real shoppers blocked together in the middle of a drop.
+# The ALB only accepts requests carrying CloudFront's secret origin header, so nobody can go around the edge.
 
-resource "aws_wafv2_web_acl" "main" {
-  name  = local.name
-  scope = "REGIONAL"
+resource "aws_wafv2_web_acl" "edge" {
+  provider = aws.us_east_1
+  name     = "${local.name}-edge"
+  scope    = "CLOUDFRONT"
 
   default_action {
     allow {}
   }
 
+  # Bots are the drop's real enemy. Razorpay's and Stripe's servers are "bots" too: webhook deliveries are left
+  # alone by the bot, common and flood rules (they are verified by HMAC in the app instead).
   rule {
     name     = "aws-bot-control"
     priority = 1
@@ -29,7 +35,6 @@ resource "aws_wafv2_web_acl" "main" {
           }
         }
 
-        # Razorpay's and Stripe's servers are "bots" too: never challenge webhook deliveries
         scope_down_statement {
           not_statement {
             statement {
@@ -57,6 +62,7 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
+  # Large gateway payloads would trip the body-size and XSS body checks, so webhooks are out of scope here too.
   rule {
     name     = "aws-common"
     priority = 2
@@ -69,6 +75,24 @@ resource "aws_wafv2_web_acl" "main" {
       managed_rule_group_statement {
         vendor_name = "AWS"
         name        = "AWSManagedRulesCommonRuleSet"
+
+        scope_down_statement {
+          not_statement {
+            statement {
+              byte_match_statement {
+                search_string         = "/webhooks/"
+                positional_constraint = "STARTS_WITH"
+                field_to_match {
+                  uri_path {}
+                }
+                text_transformation {
+                  priority = 0
+                  type     = "NONE"
+                }
+              }
+            }
+          }
+        }
       }
     }
 
@@ -79,6 +103,7 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
+  # A bot farming waiting-room tickets from one address is cut off. (The app also allows one ticket per account.)
   rule {
     name     = "queue-join-per-ip"
     priority = 3
@@ -115,6 +140,7 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
+  # Site-wide flood guard. Gateways retry webhooks in bursts after an outage, so they don't count against it.
   rule {
     name     = "per-ip-flood"
     priority = 4
@@ -127,6 +153,24 @@ resource "aws_wafv2_web_acl" "main" {
       rate_based_statement {
         limit              = var.waf_rate_limit_per_ip
         aggregate_key_type = "IP"
+
+        scope_down_statement {
+          not_statement {
+            statement {
+              byte_match_statement {
+                search_string         = "/webhooks/"
+                positional_constraint = "STARTS_WITH"
+                field_to_match {
+                  uri_path {}
+                }
+                text_transformation {
+                  priority = 0
+                  type     = "NONE"
+                }
+              }
+            }
+          }
+        }
       }
     }
 
@@ -139,14 +183,70 @@ resource "aws_wafv2_web_acl" "main" {
 
   visibility_config {
     cloudwatch_metrics_enabled = true
-    metric_name                = local.name
+    metric_name                = "${local.name}-edge"
     sampled_requests_enabled   = true
   }
 }
 
-# --- CloudFront in front of the storefront --------------------------------------------------------------------------
+# --- The ALB accepts CloudFront only --------------------------------------------------------------------------------
+# CloudFront adds a secret header on its way to the origin; the ALB's WAF lets through only requests that carry it.
+# To rotate: taint random_password.origin_verify and apply (CloudFront and the WAF change in the same apply; expect a
+# few seconds of 403s at the ALB while CloudFront's config propagates).
+
+resource "random_password" "origin_verify" {
+  length  = 48
+  special = false
+}
+
+resource "aws_wafv2_web_acl" "origin" {
+  name  = "${local.name}-origin"
+  scope = "REGIONAL"
+
+  default_action {
+    block {}
+  }
+
+  rule {
+    name     = "from-cloudfront"
+    priority = 1
+
+    action {
+      allow {}
+    }
+
+    statement {
+      byte_match_statement {
+        search_string         = random_password.origin_verify.result
+        positional_constraint = "EXACTLY"
+        field_to_match {
+          single_header {
+            name = "x-origin-verify"
+          }
+        }
+        text_transformation {
+          priority = 0
+          type     = "NONE"
+        }
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name}-from-cloudfront"
+      sampled_requests_enabled   = false
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "${local.name}-origin"
+    sampled_requests_enabled   = false
+  }
+}
+
+# --- CloudFront --------------------------------------------------------------------------------------------------
 # Static assets from S3, product pages cached for as long as the origin says (ISR: 30 s), live stock for 1 s,
-# and everything personal (the line, checkout, orders) passed straight through with cookies and never cached.
+# and everything personal (the line, checkout, orders, sign-in, webhooks) passed straight through, never cached.
 
 data "aws_cloudfront_cache_policy" "optimized" {
   name = "Managed-CachingOptimized"
@@ -156,11 +256,15 @@ data "aws_cloudfront_cache_policy" "disabled" {
   name = "Managed-CachingDisabled"
 }
 
-data "aws_cloudfront_origin_request_policy" "all_viewer" {
-  name = "Managed-AllViewer"
+# Every viewer header, cookie and query string goes to the origin, except Host: the ALB routes on the origin's own
+# hostname, and CloudFront checks the ALB's certificate against it.
+data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
+  name = "Managed-AllViewerExceptHostHeader"
 }
 
-# Honour the origin's Cache-Control (s-maxage) without putting cookies or headers in the cache key.
+# Honour the origin's Cache-Control (s-maxage), with no cookies in the cache key. Next.js answers the same URL with
+# either HTML or an RSC payload (client-side navigation) and relies on `Vary`, which CloudFront ignores, so the
+# headers and the `_rsc` parameter that tell them apart are part of the key.
 resource "aws_cloudfront_cache_policy" "origin_controlled" {
   name        = "${local.name}-origin-controlled"
   min_ttl     = 0
@@ -174,10 +278,16 @@ resource "aws_cloudfront_cache_policy" "origin_controlled" {
       cookie_behavior = "none"
     }
     headers_config {
-      header_behavior = "none"
+      header_behavior = "whitelist"
+      headers {
+        items = ["RSC", "Next-Router-Prefetch", "Next-Router-Segment-Prefetch"]
+      }
     }
     query_strings_config {
-      query_string_behavior = "none"
+      query_string_behavior = "whitelist"
+      query_strings {
+        items = ["_rsc"]
+      }
     }
   }
 }
@@ -196,6 +306,7 @@ resource "aws_cloudfront_distribution" "shop" {
   aliases         = var.shop_domain == "" ? [] : [var.shop_domain]
   price_class     = "PriceClass_200"
   http_version    = "http2and3"
+  web_acl_id      = aws_wafv2_web_acl.edge.arn
 
   origin {
     origin_id   = "web"
@@ -206,6 +317,11 @@ resource "aws_cloudfront_distribution" "shop" {
       https_port             = 443
       origin_protocol_policy = "https-only"
       origin_ssl_protocols   = ["TLSv1.2"]
+    }
+
+    custom_header {
+      name  = "X-Origin-Verify"
+      value = random_password.origin_verify.result
     }
   }
 
@@ -223,7 +339,7 @@ resource "aws_cloudfront_distribution" "shop" {
     cached_methods           = ["GET", "HEAD"]
     compress                 = true
     cache_policy_id          = aws_cloudfront_cache_policy.origin_controlled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
   }
 
   ordered_cache_behavior {
@@ -255,7 +371,7 @@ resource "aws_cloudfront_distribution" "shop" {
     cached_methods           = ["GET", "HEAD"]
     compress                 = true
     cache_policy_id          = aws_cloudfront_cache_policy.origin_controlled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
   }
 
   # personal: the line, checkout, orders, sign-in
@@ -267,7 +383,7 @@ resource "aws_cloudfront_distribution" "shop" {
     cached_methods           = ["GET", "HEAD"]
     compress                 = true
     cache_policy_id          = data.aws_cloudfront_cache_policy.disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
   }
 
   ordered_cache_behavior {
@@ -277,7 +393,19 @@ resource "aws_cloudfront_distribution" "shop" {
     allowed_methods          = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods           = ["GET", "HEAD"]
     cache_policy_id          = data.aws_cloudfront_cache_policy.disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+  }
+
+  # payment webhooks: the body must reach the API byte for byte (it is HMAC-signed), so no compression or caching
+  ordered_cache_behavior {
+    path_pattern             = "/webhooks/*"
+    target_origin_id         = "web"
+    viewer_protocol_policy   = "https-only"
+    allowed_methods          = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods           = ["GET", "HEAD"]
+    compress                 = false
+    cache_policy_id          = data.aws_cloudfront_cache_policy.disabled.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
   }
 
   restrictions {

@@ -113,15 +113,15 @@ variable "alarm_topic_arn" {
 }
 
 variable "waf_rate_limit_per_ip" {
-  description = "Requests per IP per 5 minutes across the site before blocking."
+  description = "Requests per viewer IP per 5 minutes across the site before blocking. Mobile carriers put many shoppers behind one IPv4 address (CGNAT), so keep it generous; per-account limits are enforced in the app."
   type        = number
   default     = 3000
 }
 
 variable "waf_queue_join_limit_per_ip" {
-  description = "Waiting-room joins per IP per 5 minutes: a bot farming tickets from one address is cut off."
+  description = "Waiting-room joins per viewer IP per 5 minutes: a bot farming tickets from one address is cut off. Each account holds one ticket, so a person rarely joins more than a few times; the headroom is for shoppers sharing a carrier IP."
   type        = number
-  default     = 100
+  default     = 300
 }
 
 variable "shop_domain" {
@@ -131,7 +131,7 @@ variable "shop_domain" {
 }
 
 variable "web_origin_domain" {
-  description = "Hostname of the ALB (or its alias) that serves the storefront; CloudFront's origin for pages."
+  description = "Hostname of the ALB (a DNS alias covered by the ALB's certificate). CloudFront's origin for pages, the /api/sc proxy and webhooks; nothing else may call it."
   type        = string
   default     = "origin.example.com"
 }
