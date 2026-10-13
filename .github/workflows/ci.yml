@@ -108,6 +108,57 @@ jobs:
       - if: always()
         run: docker compose -f deploy/docker-compose.yml down -v
 
+  manifests:
+    name: Kubernetes · kustomize + kubeconform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install kubeconform
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz -C "$HOME/bin" kubeconform
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+      - name: Render prod overlay
+        run: kubectl kustomize k8s/overlays/prod > rendered.yaml
+      # core resources against the Kubernetes schemas; KEDA, External Secrets and Argo CD CRDs from the CRDs catalog
+      - name: Validate
+        run: |
+          kubeconform -strict -summary -output text \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            rendered.yaml argocd/application.yaml 2>&1 | tee kubeconform.log; exit ${PIPESTATUS[0]}
+        shell: bash
+      - name: Annotate failures
+        if: failure()
+        run: |
+          body=$(grep -viE '^Summary' kubeconform.log | head -30 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          echo "::error title=kubeconform::${body}"
+
+  terraform:
+    name: Terraform · fmt + validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - name: terraform fmt
+        run: |
+          if ! terraform fmt -check -recursive -diff > fmt.diff; then
+            body=$(head -80 fmt.diff | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=terraform fmt::${body}"
+            exit 1
+          fi
+      - run: terraform init -backend=false -input=false
+      - name: terraform validate
+        run: |
+          terraform validate -json > validate.json || true
+          jq -r '.diagnostics[]? | "::\(if .severity == "error" then "error" else "warning" end) title=\(.summary)::\(.range.filename // ""):\(.range.start.line // 0) \(.detail // "" | gsub("\n"; " "))"' validate.json
+          jq -e '.valid' validate.json
+
   images:
     name: Images · ${{ matrix.app }}
     needs: [api, web]
@@ -116,6 +167,7 @@ jobs:
       contents: read
       packages: write
     strategy:
+      fail-fast: false
       matrix:
         app: [api, web]
     steps:
@@ -139,3 +191,9 @@ jobs:
             ghcr.io/argod2213/swiftcart-${{ matrix.app }}:latest
           cache-from: type=gha,scope=${{ matrix.app }}
           cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+      - name: Annotate failures
+        if: failure()
+        run: |
+          docker build --progress=plain ${{ matrix.app }} > build.log 2>&1 || true
+          body=$(grep -vE '^#[0-9]+ (sha256|DONE|CACHED|resolve|extracting|transferring)' build.log | tail -60 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          echo "::error title=docker build ${{ matrix.app }}::${body:0:6000}"
