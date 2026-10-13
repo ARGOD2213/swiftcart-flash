@@ -1,0 +1,9 @@
+{
+  "request": { "method": "POST", "urlPath": "/shipments" },
+  "response": {
+    "status": 201,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": { "id": "SHP-{{randomValue length=8 type='ALPHANUMERIC' uppercase=true}}", "status": "accepted" },
+    "transformers": ["response-template"]
+  }
+}

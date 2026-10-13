@@ -21,3 +21,7 @@ infra/terraform/*.tfvars
 .idea/
 .vscode/
 .DS_Store
+
+# load test output
+loadtest/result.json
+loadtest/audit.json
