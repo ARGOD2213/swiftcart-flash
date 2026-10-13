@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="A low-top sneaker">
+  <defs>
+    <linearGradient id="upper" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a2a33"/>
+      <stop offset="1" stop-color="#0f0f14"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff5a6e"/>
+      <stop offset="1" stop-color="#ff9a5a"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="330" cy="318" rx="260" ry="16" fill="#000" opacity="0.45"/>
+  <!-- sole -->
+  <path d="M62 262 C60 292 86 302 120 302 L548 302 C584 302 600 286 596 262 Z" fill="#f4efe9"/>
+  <path d="M62 262 L596 262 L594 276 L64 276 Z" fill="#d9d2ca"/>
+  <!-- upper -->
+  <path d="M70 262 C64 222 84 196 132 186 C190 174 230 142 262 104 C276 88 302 84 318 96 L352 124 C392 154 452 176 520 192 C566 203 596 226 596 262 Z" fill="url(#upper)"/>
+  <!-- toe cap -->
+  <path d="M470 186 C520 194 576 210 590 246 C594 254 596 258 596 262 L470 262 C462 236 462 208 470 186 Z" fill="#1b1b22"/>
+  <!-- swoosh-free stripe: an original zig-zag -->
+  <path d="M160 238 L236 196 L268 226 L340 172 L376 206 L448 160" fill="none" stroke="url(#accent)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- heel tab -->
+  <path d="M70 262 C66 236 72 214 88 200 L108 196 C100 216 98 240 102 262 Z" fill="#ff5a6e"/>
+  <!-- collar -->
+  <path d="M262 104 C286 128 316 140 352 124" fill="none" stroke="#3b3b46" stroke-width="10" stroke-linecap="round"/>
+  <!-- laces -->
+  <g stroke="#f4efe9" stroke-width="6" stroke-linecap="round">
+    <path d="M330 120 L360 150"/><path d="M350 112 L384 146"/><path d="M372 128 L404 160"/><path d="M392 140 L424 170"/>
+  </g>
+  <!-- eyelets -->
+  <g fill="#0b0b0f"><circle cx="326" cy="132" r="4"/><circle cx="348" cy="146" r="4"/><circle cx="370" cy="158" r="4"/><circle cx="392" cy="168" r="4"/></g>
+</svg>
