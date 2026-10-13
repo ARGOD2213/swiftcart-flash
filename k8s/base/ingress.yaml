@@ -1,0 +1,29 @@
+# One ALB with AWS WAF (bot control, per-IP limits). CloudFront sits in front of the storefront host.
+# The API itself is not public: shoppers reach it through the storefront's /api/sc proxy, and only payment
+# webhooks are routed to it from outside.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: swiftcart
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-south-1:ACCOUNT_ID:certificate/CERT_ID
+    alb.ingress.kubernetes.io/wafv2-acl-arn: arn:aws:wafv2:ap-south-1:ACCOUNT_ID:regional/webacl/swiftcart/WAF_ID
+spec:
+  ingressClassName: alb
+  rules:
+    - host: origin.shop.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: swiftcart-web, port: { number: 80 } } }
+    - host: hooks.shop.example.com
+      http:
+        paths:
+          - path: /webhooks
+            pathType: Prefix
+            backend: { service: { name: swiftcart-api, port: { number: 80 } } }

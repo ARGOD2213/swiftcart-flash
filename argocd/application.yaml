@@ -1,0 +1,27 @@
+# GitOps: Argo CD keeps the cluster in sync with k8s/overlays/prod on main.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: swiftcart
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ARGOD2213/swiftcart-flash
+    targetRevision: main
+    path: k8s/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: swiftcart
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  # the HPA (via KEDA) owns replicas; don't fight it on every sync
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

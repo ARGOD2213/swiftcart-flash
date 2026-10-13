@@ -1,0 +1,14 @@
+# Production overlay, synced by Argo CD (argocd/application.yaml).
+# Placeholders in k8s/base (AURORA_ENDPOINT, ACCOUNT_ID, example.com hosts) are replaced with
+# `terraform output app_config` / `irsa_role_arns` / `waf_acl_arn` before the first sync.
+# Every merge to main publishes ghcr.io/argod2213/swiftcart-{api,web}:sha-<commit>; a release is a one-line change
+# here (kustomize edit set image ...) and Argo CD rolls it out.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: ghcr.io/argod2213/swiftcart-api
+    newTag: latest
+  - name: ghcr.io/argod2213/swiftcart-web
+    newTag: latest

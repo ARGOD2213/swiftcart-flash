@@ -1,0 +1,67 @@
+# Storefront (Next.js). Product pages are ISR-cached here and at CloudFront; live state goes through /api/sc.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swiftcart-web
+  labels: { app: swiftcart-web }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: swiftcart-web }
+  template:
+    metadata:
+      labels: { app: swiftcart-web }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: web
+          image: ghcr.io/argod2213/swiftcart-web:latest
+          ports:
+            - { name: http, containerPort: 3000 }
+          env:
+            - { name: API_URL, value: http://swiftcart-api }
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { memory: 384Mi }
+          readinessProbe:
+            httpGet: { path: /login, port: http }
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: swiftcart-web
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-path: /login
+spec:
+  selector: { app: swiftcart-web }
+  ports:
+    - { name: http, port: 80, targetPort: http }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: swiftcart-web
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: swiftcart-web }
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 65 }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: swiftcart-web
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: swiftcart-web }

@@ -1,0 +1,130 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: swiftcart-api
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/swiftcart-api # IRSA: send to the fulfilment queue
+---
+# Checkout API. Also runs the once-a-second jobs (reaper, admissions, outbox relay, reconciler); a Postgres
+# advisory lock makes exactly one pod do each round, so scaling the API never duplicates them.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swiftcart-api
+  labels: { app: swiftcart-api }
+spec:
+  replicas: 2 # owned by KEDA below
+  strategy:
+    rollingUpdate: { maxSurge: 25%, maxUnavailable: 0 }
+  selector:
+    matchLabels: { app: swiftcart-api }
+  template:
+    metadata:
+      labels: { app: swiftcart-api }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /actuator/prometheus
+    spec:
+      serviceAccountName: swiftcart-api
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: swiftcart-api }
+      containers:
+        - name: api
+          image: ghcr.io/argod2213/swiftcart-api:latest
+          ports:
+            - { name: http, containerPort: 8080 }
+          envFrom:
+            - configMapRef: { name: swiftcart-config }
+            - secretRef: { name: swiftcart-secrets }
+          resources:
+            requests: { cpu: "1", memory: 1Gi }
+            limits: { memory: 1Gi }
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 3
+            failureThreshold: 40
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+          lifecycle:
+            # let the load balancer stop sending new checkouts before the pod drains
+            preStop: { sleep: { seconds: 10 } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: swiftcart-api
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health/readiness
+spec:
+  selector: { app: swiftcart-api }
+  ports:
+    - { name: http, port: 80, targetPort: http }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: swiftcart-api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: swiftcart-api }
+---
+# Scheduled pre-scaling + reactive scaling in one HPA (created by KEDA):
+#  - metrics-api: the API's own /internal/scaling says how many pods the next drop needs, from 15 minutes
+#    before it opens until it closes, so pods are warm before the crowd arrives;
+#  - cpu: on top of that, scale with real load.
+# If the scaling endpoint can't be read (every API pod down), KEDA falls back to 6 replicas.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: swiftcart-api
+spec:
+  scaleTargetRef:
+    name: swiftcart-api
+  minReplicaCount: 2
+  maxReplicaCount: 40
+  pollingInterval: 30
+  cooldownPeriod: 600
+  fallback:
+    failureThreshold: 3
+    replicas: 6
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 600
+          policies:
+            - { type: Percent, value: 20, periodSeconds: 60 }
+  triggers:
+    - type: metrics-api
+      metricType: AverageValue
+      metadata:
+        url: http://swiftcart-api.swiftcart.svc.cluster.local/internal/scaling
+        valueLocation: checkoutReplicas
+        targetValue: "1"
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "60"

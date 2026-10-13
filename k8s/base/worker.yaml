@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: swiftcart-worker
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/swiftcart-worker # IRSA: consume the FIFO queue, send email
+---
+# Fulfilment worker: same image, worker profile (no HTTP server, no schedulers).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swiftcart-worker
+  labels: { app: swiftcart-worker }
+spec:
+  replicas: 0 # owned by KEDA below
+  selector:
+    matchLabels: { app: swiftcart-worker }
+  template:
+    metadata:
+      labels: { app: swiftcart-worker }
+    spec:
+      serviceAccountName: swiftcart-worker
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: worker
+          image: ghcr.io/argod2213/swiftcart-api:latest
+          env:
+            - { name: SPRING_PROFILES_ACTIVE, value: worker }
+          envFrom:
+            - configMapRef: { name: swiftcart-config }
+            - secretRef: { name: swiftcart-secrets }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# Fulfilment scales on queue depth: zero workers when there's nothing to ship, up to 10 after a drop.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: swiftcart-worker
+spec:
+  scaleTargetRef:
+    name: swiftcart-worker
+  minReplicaCount: 0
+  maxReplicaCount: 10
+  pollingInterval: 15
+  cooldownPeriod: 300
+  triggers:
+    - type: aws-sqs-queue
+      authenticationRef:
+        name: keda-aws
+      metadata:
+        queueURL: https://sqs.ap-south-1.amazonaws.com/ACCOUNT_ID/swiftcart-fulfilment.fifo
+        queueLength: "50"
+        awsRegion: ap-south-1
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-aws
+spec:
+  podIdentity:
+    provider: aws
