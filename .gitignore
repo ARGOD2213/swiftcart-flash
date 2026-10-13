@@ -1,0 +1,23 @@
+# Java
+api/target/
+*.class
+*.log
+
+# Node
+web/node_modules/
+web/.next/
+web/out/
+web/.env*.local
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/*.tfvars
+!infra/terraform/example.tfvars
+
+# Local
+.env
+.idea/
+.vscode/
+.DS_Store

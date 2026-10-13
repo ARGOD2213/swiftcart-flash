@@ -1,0 +1,97 @@
+spring:
+  application:
+    name: swiftcart
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/swiftcart}
+    username: ${DB_USER:swiftcart}
+    password: ${DB_PASSWORD:swiftcart}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:20}
+      connection-timeout: 3000
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL:false}
+      timeout: 2s
+  task:
+    scheduling:
+      pool:
+        size: 4
+
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    distribution:
+      slo:
+        "[http.server.requests]": 50ms,100ms,250ms,500ms,1s
+  tracing:
+    enabled: ${TRACING_ENABLED:false}
+    sampling:
+      probability: ${TRACING_SAMPLE:0.1}
+  otlp:
+    tracing:
+      endpoint: ${OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+
+logging:
+  pattern:
+    level: "%5p [%X{traceId:-},%X{spanId:-}]"
+
+swiftcart:
+  security:
+    jwt-secret: ${JWT_SECRET:}
+    entry-token-secret: ${ENTRY_TOKEN_SECRET:}
+    access-token-ttl: ${ACCESS_TOKEN_TTL:2h}
+    entry-token-ttl: ${ENTRY_TOKEN_TTL:10m}
+    admin-emails: ${ADMIN_EMAILS:}
+    login-max-failures: 5
+    login-lockout: 15m
+  payments:
+    gateway: ${PAYMENT_GATEWAY:razorpay}
+    stale-after: 2m
+    late-window: 24h
+    razorpay:
+      base-url: ${RAZORPAY_BASE_URL:https://api.razorpay.com}
+      key-id: ${RAZORPAY_KEY_ID:}
+      key-secret: ${RAZORPAY_KEY_SECRET:}
+      webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+    stripe:
+      base-url: ${STRIPE_BASE_URL:https://api.stripe.com}
+      secret-key: ${STRIPE_SECRET_KEY:}
+      webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+      success-url: ${STRIPE_SUCCESS_URL:http://localhost:3000/orders/{ORDER_ID}}
+      cancel-url: ${STRIPE_CANCEL_URL:http://localhost:3000/orders/{ORDER_ID}}
+      tolerance: 5m
+    simulator:
+      webhook-secret: ${SIMULATOR_WEBHOOK_SECRET:}
+  aws:
+    region: ${AWS_REGION:ap-south-1}
+    endpoint: ${AWS_ENDPOINT:}
+    fulfilment-queue-url: ${FULFILMENT_QUEUE_URL:}
+    ses-from-address: ${SES_FROM_ADDRESS:}
+  jobs:
+    enabled: ${JOBS_ENABLED:true}
+  worker:
+    enabled: ${WORKER_ENABLED:false}
+    max-receives: 5
+  scaling:
+    min-replicas: ${SCALING_MIN_REPLICAS:2}
+    max-replicas: ${SCALING_MAX_REPLICAS:40}
+    rps-per-pod: ${SCALING_RPS_PER_POD:150}
+    lead: ${SCALING_LEAD:15m}
+  warehouse:
+    url: ${WAREHOUSE_URL:}
+    api-key: ${WAREHOUSE_API_KEY:}

@@ -1,0 +1,11 @@
+# Local development and load tests: simulated payments, throwaway secrets, /dev endpoints.
+# Never use this profile anywhere real.
+swiftcart:
+  security:
+    jwt-secret: ${JWT_SECRET:local-dev-only-jwt-secret-0123456789abcdef}
+    entry-token-secret: ${ENTRY_TOKEN_SECRET:local-dev-only-entry-secret-0123456789abcd}
+    admin-emails: ${ADMIN_EMAILS:admin@swiftcart.local}
+  payments:
+    gateway: ${PAYMENT_GATEWAY:simulator}
+    simulator:
+      webhook-secret: ${SIMULATOR_WEBHOOK_SECRET:local-dev-only-simulator-secret}

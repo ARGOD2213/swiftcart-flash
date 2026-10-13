@@ -1,0 +1,9 @@
+# The fulfilment worker: same image, no HTTP server, no schedulers, consumes the FIFO queue.
+spring:
+  main:
+    web-application-type: none
+swiftcart:
+  jobs:
+    enabled: false
+  worker:
+    enabled: true
