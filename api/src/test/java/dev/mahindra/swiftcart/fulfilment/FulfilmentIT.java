@@ -42,7 +42,7 @@ class FulfilmentIT extends IntegrationTest {
         pay(o);
         UUID id = UUID.fromString(o.path("id").asText());
 
-        await().atMost(Duration.ofSeconds(60)).until(() -> drained() && "FULFILLED".equals(status(id.toString())));
+        await().atMost(Duration.ofSeconds(60)).until(() -> drained() && "FULFILLED".equals(orderStatus(id.toString())));
 
         String invoice = jdbc.sql("select number from invoices where order_id = ?").param(id).query(String.class).single();
         assertThat(invoice).matches("SC/\\d{4}-\\d{2}/\\d{6}");
@@ -78,8 +78,8 @@ class FulfilmentIT extends IntegrationTest {
         JsonNode b = order(shopper(), d, "TEE-M", 1);
         pay(a);
         pay(b);
-        await().atMost(Duration.ofSeconds(60)).until(() -> drained() && "FULFILLED".equals(status(a.path("id").asText()))
-                && "FULFILLED".equals(status(b.path("id").asText())));
+        await().atMost(Duration.ofSeconds(60)).until(() -> drained() && "FULFILLED".equals(orderStatus(a.path("id").asText()))
+                && "FULFILLED".equals(orderStatus(b.path("id").asText())));
         assertThat(number(a)).isNotEqualTo(number(b));
         // across everything invoiced so far: numbers 1..N with no holes, one invoice per order
         long count = jdbc.sql("select count(*) from invoices").query(Long.class).single();

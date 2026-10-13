@@ -211,7 +211,7 @@ public abstract class IntegrationTest {
         return pay(order, "captured", order.path("amountMinor").asLong());
     }
 
-    protected String status(String orderId) {
+    protected String orderStatus(String orderId) {
         return jdbc.sql("select status from orders where id = ?").param(UUID.fromString(orderId)).query(String.class).single();
     }
 

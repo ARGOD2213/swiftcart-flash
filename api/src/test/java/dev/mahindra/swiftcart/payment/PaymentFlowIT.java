@@ -37,13 +37,13 @@ class PaymentFlowIT extends IntegrationTest {
         WebhookService.Result r = pay(o);
 
         assertThat(r.outcome()).isEqualTo(PaymentService.Outcome.PAID);
-        assertThat(status(id(o))).isEqualTo("PAID");
+        assertThat(orderStatus(id(o))).isEqualTo("PAID");
         assertThat(events(o, "ORDER_PAID")).isEqualTo(1);
         assertThat(paymentStatuses(o)).containsExactly("CAPTURED");
         // a paid hold is never released by the reaper, even after its time is up
         expireNow(d, id(o));
         reaper.reap();
-        assertThat(status(id(o))).isEqualTo("PAID");
+        assertThat(orderStatus(id(o))).isEqualTo("PAID");
         assertThat(stock(d, "TEE-M")).isEqualTo(9);
     }
 
@@ -75,7 +75,7 @@ class PaymentFlowIT extends IntegrationTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.outcome").value("PAID"));
         mvc.perform(post("/webhooks/nope").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isNotFound());
-        assertThat(status(id(o))).isEqualTo("PAID");
+        assertThat(orderStatus(id(o))).isEqualTo("PAID");
     }
 
     @Test
@@ -83,7 +83,7 @@ class PaymentFlowIT extends IntegrationTest {
         Drop d = liveDrop(10, 2);
         JsonNode o = order(shopperUnchecked(), d);
         assertThat(pay(o, "failed", o.path("amountMinor").asLong()).outcome()).isEqualTo(PaymentService.Outcome.FAILURE_RECORDED);
-        assertThat(status(id(o))).isEqualTo("PENDING_PAYMENT");
+        assertThat(orderStatus(id(o))).isEqualTo("PENDING_PAYMENT");
         assertThat(jdbc.sql("select last_payment_error from orders where id = ?").param(UUID.fromString(id(o))).query(String.class).single())
                 .contains("declined");
         assertThat(pay(o).outcome()).isEqualTo(PaymentService.Outcome.PAID);
@@ -101,7 +101,7 @@ class PaymentFlowIT extends IntegrationTest {
         SimulatorGateway.SignedWebhook stale = sim().webhook(failedLater, "evt_" + UUID.randomUUID());
         webhooks.handle("simulator", stale.body(), stale.headers());
 
-        assertThat(status(id(o))).isEqualTo("PAID");
+        assertThat(orderStatus(id(o))).isEqualTo("PAID");
         assertThat(paymentStatuses(o)).containsExactly("CAPTURED");
     }
 
@@ -123,7 +123,7 @@ class PaymentFlowIT extends IntegrationTest {
         Drop d = liveDrop(10, 2);
         JsonNode o = order(shopperUnchecked(), d);
         assertThat(pay(o, "captured", 100).outcome()).isEqualTo(PaymentService.Outcome.REVIEW);
-        assertThat(status(id(o))).isEqualTo("REVIEW");
+        assertThat(orderStatus(id(o))).isEqualTo("REVIEW");
         assertThat(events(o, "ORDER_PAID")).isZero();
         assertThat(stock(d, "TEE-M")).isEqualTo(9); // units stay held while a human looks
     }
@@ -134,11 +134,11 @@ class PaymentFlowIT extends IntegrationTest {
         JsonNode o = order(shopperUnchecked(), d);
         expireNow(d, id(o));
         reaper.reap();
-        assertThat(status(id(o))).isEqualTo("EXPIRED");
+        assertThat(orderStatus(id(o))).isEqualTo("EXPIRED");
         assertThat(stock(d, "TEE-M")).isEqualTo(10);
 
         assertThat(pay(o).outcome()).isEqualTo(PaymentService.Outcome.RESCUED);
-        assertThat(status(id(o))).isEqualTo("PAID");
+        assertThat(orderStatus(id(o))).isEqualTo("PAID");
         assertThat(stock(d, "TEE-M")).isEqualTo(9);
     }
 
@@ -152,7 +152,7 @@ class PaymentFlowIT extends IntegrationTest {
         pay(fast);
 
         assertThat(pay(slow).outcome()).isEqualTo(PaymentService.Outcome.REFUNDING);
-        assertThat(status(id(slow))).isEqualTo("EXPIRED");
+        assertThat(orderStatus(id(slow))).isEqualTo("EXPIRED");
         assertThat(paymentStatuses(slow)).containsExactly("REFUND_PENDING");
         assertThat(stock(d, "TEE-M")).isZero();
         assertThat(jdbc.sql("select count(*) from orders where drop_id = ? and status = 'PAID'").param(d.id()).query(Long.class).single())
@@ -166,7 +166,7 @@ class PaymentFlowIT extends IntegrationTest {
         expireNow(d, id(o)); // time is up, but the reaper hasn't run
         assertThat(pay(o).outcome()).isEqualTo(PaymentService.Outcome.PAID);
         reaper.reap();
-        assertThat(status(id(o))).isEqualTo("PAID");
+        assertThat(orderStatus(id(o))).isEqualTo("PAID");
         assertThat(stock(d, "TEE-M")).isZero();
     }
 
@@ -191,7 +191,7 @@ class PaymentFlowIT extends IntegrationTest {
         jdbc.sql("update orders set created_at = now() - interval '10 minutes' where id = ?").param(UUID.fromString(id(o))).update();
 
         assertThat(reconciler.reconcile()).isGreaterThanOrEqualTo(1);
-        assertThat(status(id(o))).isEqualTo("PAID");
+        assertThat(orderStatus(id(o))).isEqualTo("PAID");
     }
 
     @Test
@@ -200,7 +200,7 @@ class PaymentFlowIT extends IntegrationTest {
         JsonNode o = order(shopperUnchecked(), d);
         WebhookService.Result r = pay(o, "authorized", o.path("amountMinor").asLong());
         assertThat(r.outcome()).isEqualTo(PaymentService.Outcome.CAPTURE_NEEDED);
-        assertThat(status(id(o))).isEqualTo("PAID"); // captured right after the webhook was handled
+        assertThat(orderStatus(id(o))).isEqualTo("PAID"); // captured right after the webhook was handled
         assertThat(paymentStatuses(o)).containsExactly("CAPTURED");
     }
 
@@ -234,7 +234,7 @@ class PaymentFlowIT extends IntegrationTest {
             assertThatThrownBy(() -> webhooks.handle("simulator", hook.body(), hook.headers()))
                     .isInstanceOf(ApiException.class)
                     .satisfies(e -> assertThat(((ApiException) e).status().value()).isEqualTo(503));
-            assertThat(status(id(o))).isEqualTo("PENDING_PAYMENT");
+            assertThat(orderStatus(id(o))).isEqualTo("PENDING_PAYMENT");
             assertThat(paymentStatusesOrEmpty(o)).isEmpty(); // rolled back with the dedupe row
         } finally {
             redis.opsForHash().put(Keys.meta(d.id()), "state", "READY");

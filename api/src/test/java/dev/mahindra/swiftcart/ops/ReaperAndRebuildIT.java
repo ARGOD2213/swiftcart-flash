@@ -33,7 +33,7 @@ class ReaperAndRebuildIT extends IntegrationTest {
         expireNow(d, o.path("id").asText());
         assertThat(reaper.reap()).isGreaterThanOrEqualTo(1);
 
-        assertThat(status(o.path("id").asText())).isEqualTo("EXPIRED");
+        assertThat(orderStatus(o.path("id").asText())).isEqualTo("EXPIRED");
         assertThat(stock(d, "TEE-M")).isEqualTo(1);
         assertThat(checkout(shopper(), d, UUID.randomUUID().toString(), body("TEE-M", 1, uniquePhone())).getResponse().getStatus())
                 .isEqualTo(201);
@@ -52,7 +52,7 @@ class ReaperAndRebuildIT extends IntegrationTest {
 
         reaper.reap();
 
-        assertThat(status(o.path("id").asText())).isEqualTo("EXPIRED");
+        assertThat(orderStatus(o.path("id").asText())).isEqualTo("EXPIRED");
         assertThat(stock(d, "TEE-M")).isEqualTo(5);
     }
 
