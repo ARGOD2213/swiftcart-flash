@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API · build + Testcontainers tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      # unit tests + integration tests against real Postgres, Redis and LocalStack (SQS FIFO), WireMock for gateways
+      - run: mvn -B -ntp verify -Dsurefire.useFile=true 2>&1 | tee maven.log; exit ${PIPESTATUS[0]}
+        shell: bash
+      - name: Test summary
+        if: always()
+        run: bash ../.github/scripts/test-summary.sh target/surefire-reports target/failsafe-reports
+      - name: Annotate failures
+        if: failure()
+        run: bash ../.github/scripts/annotate-maven.sh maven.log target/surefire-reports target/failsafe-reports
+      - name: Test reports
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: api-test-reports
+          path: |
+            api/target/surefire-reports/
+            api/target/failsafe-reports/
+          if-no-files-found: ignore
