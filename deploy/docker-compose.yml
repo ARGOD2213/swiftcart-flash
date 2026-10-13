@@ -86,5 +86,6 @@ services:
     environment:
       API_URL: http://api:8080
       ALLOW_INSECURE_COOKIES: "1"
+      SIMULATOR_ENABLED: "1"
     ports: ["3000:3000"]
     depends_on: [api]

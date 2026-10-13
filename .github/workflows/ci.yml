@@ -70,16 +70,19 @@ jobs:
           echo "::error title=web build::${body}"
 
   e2e:
-    name: End to end · compose + demo.sh + k6 load test
+    name: End to end · compose + demo.sh + storefront + k6 load test
     needs: [api]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
-      # the whole stack, built from this commit: Postgres, Redis, LocalStack SQS FIFO, warehouse stub, API, worker
-      - run: docker compose -f deploy/docker-compose.yml up -d --build postgres redis localstack warehouse api worker
+      # the whole stack, built from this commit: Postgres, Redis, LocalStack SQS FIFO, warehouse stub, API, worker, storefront
+      - run: docker compose -f deploy/docker-compose.yml up -d --build
       - name: Edge cases (scripts/demo.sh)
         run: scripts/demo.sh 2>&1 | tee demo.log; exit ${PIPESTATUS[0]}
+        shell: bash
+      - name: Storefront (scripts/storefront-smoke.sh)
+        run: scripts/storefront-smoke.sh 2>&1 | tee storefront.log; exit ${PIPESTATUS[0]}
         shell: bash
       - name: Load test (1,500 shoppers, 300 pairs) + audit
         run: scripts/loadtest.sh 2>&1 | tee loadtest.log; exit ${PIPESTATUS[0]}
@@ -87,22 +90,24 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          for f in demo.log loadtest.log; do
+          for f in demo.log storefront.log loadtest.log; do
             [ -f "$f" ] || continue
             sed -i 's/\x1b\[[0-9;]*m//g' "$f"
             { echo "### $f"; echo '```'; tail -60 "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           done
           [ -f demo.log ] && echo "::notice title=demo.sh::$(grep -E '✓|✗|All checks' demo.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+          [ -f storefront.log ] && echo "::notice title=storefront::$(grep -E '✓|✗|All storefront' storefront.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
           [ -f loadtest.log ] && echo "::notice title=load test::$(grep -E 'drop load-|sold |✓|✗' loadtest.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
           exit 0
       - name: Annotate failures
         if: failure()
         run: |
-          for svc in api worker localstack; do
+          for svc in api worker web localstack; do
             body=$(docker compose -f deploy/docker-compose.yml logs --no-color --tail 60 "$svc" 2>&1 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
             echo "::error title=compose logs: $svc::${body:0:6000}"
           done
           [ -f demo.log ] && echo "::error title=demo.sh::$(tail -30 demo.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+          [ -f storefront.log ] && echo "::error title=storefront::$(tail -30 storefront.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
           [ -f loadtest.log ] && echo "::error title=loadtest::$(tail -40 loadtest.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
           exit 0
       - if: always()

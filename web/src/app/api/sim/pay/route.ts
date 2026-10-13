@@ -1,8 +1,11 @@
 import { API_URL } from '@/lib/api';
 
-// Local demos only: the simulated gateway's "pay" button. The API exposes /dev/* only in its dev profile, so
-// against a real deployment this answers 404 and the storefront uses Razorpay or Stripe instead.
+// Local demos only: the simulated gateway's "pay" button. Off unless SIMULATOR_ENABLED=1 (docker compose sets it),
+// and the API only has /dev/* in its dev profile anyway, so a real deployment answers 404 twice over.
 export async function POST(req: Request) {
+  if (process.env.SIMULATOR_ENABLED !== '1') {
+    return Response.json({ code: 'not_found', detail: 'No such endpoint' }, { status: 404 });
+  }
   try {
     const upstream = await fetch(`${API_URL}/dev/simulator/pay`, {
       method: 'POST',
